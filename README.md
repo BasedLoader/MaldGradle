@@ -18,7 +18,7 @@ is as simple as creating a Gradle build based on this buildscript:
 
 ```gradle
 plugins {
-    java
+    id("java")
     id("org.spongepowered.gradle.vanilla") version "0.2"
 }
 

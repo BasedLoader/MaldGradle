@@ -1,3 +1,5 @@
+**Mald Gradle is a modified version of VanillaGradle designed for the Mald ecosystem.**
+
 ![VanillaGradle Logo](docs/logo.png?raw=true)
 
 **VanillaGradle** is a toolchain for *Minecraft: Java Edition* that provides a workspace to interact with the game using official mappings provided 

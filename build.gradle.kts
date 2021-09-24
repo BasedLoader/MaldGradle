@@ -24,7 +24,7 @@ subprojects {
     }
 
     extensions.configure(net.kyori.indra.IndraExtension::class) {
-        github("SpongePowered", "VanillaGradle") {
+        github("MaldLoader", "MaldGradle") {
             ci(true)
         }
         mitLicense()
@@ -36,18 +36,17 @@ subprojects {
         configurePublications {
             pom {
                 organization {
-                    name.set("SpongePowered")
-                    url.set("https://spongepowered.org")
+                    name.set("MaldLoader")
+                    url.set("https://maldloader.com")
                 }
             }
         }
 
         if (
-            project.hasProperty("spongeSnapshotRepo") &&
-            project.hasProperty("spongeReleaseRepo")
+            project.hasProperty("maldRepo")
         ) {
-            publishSnapshotsTo("sponge", project.property("spongeSnapshotRepo") as String)
-            publishReleasesTo("sponge", project.property("spongeReleaseRepo") as String)
+            publishSnapshotsTo("maldloader", project.property("maldRepo") as String)
+            publishReleasesTo("maldloader", project.property("maldRepo") as String)
         }
     }
 

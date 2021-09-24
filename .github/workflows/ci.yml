@@ -51,19 +51,10 @@ jobs:
           else
             echo "STATUS=release" >> $GITHUB_ENV
           fi
-      - name: Publish with Gradle (snapshot)
-        if: "${{ runner.os == 'Linux' && env.STATUS != 'release' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}"
-        run: ./gradlew publish
-        env:
-          ORG_GRADLE_PROJECT_maldRepo: "${{ secrets.MAVEN_REPO }}"
-          ORG_GRADLE_PROJECT_spongeUsername: "${{ secrets.MAVEN_REPO_USER }}"
-          ORG_GRADLE_PROJECT_spongePassword: "${{ secrets.MAVEN_REPO_PASSWORD }}"
-      - name: Publish with Gradle (release)
+      - name: Publish with Gradle
         if: "${{ runner.os == 'Linux' && env.STATUS == 'release' && github.event_name == 'release' }}"
         run: ./gradlew publish publishPlugins
         env:
           ORG_GRADLE_PROJECT_maldRepo: "${{ secrets.MAVEN_REPO }}"
-          ORG_GRADLE_PROJECT_spongeUsername: "${{ secrets.MAVEN_REPO_USER }}"
-          ORG_GRADLE_PROJECT_spongePassword: "${{ secrets.MAVEN_REPO_PASSWORD }}"
           ORG_GRADLE_PROJECT_pluginPortalApiKey: "${{ secrets.GRADLE_PLUGIN_PORTAL_KEY }}"
           ORG_GRADLE_PROJECT_pluginPortalApiSecret: "${{ secrets.GRADLE_PLUGIN_PORTAL_SECRET }}"

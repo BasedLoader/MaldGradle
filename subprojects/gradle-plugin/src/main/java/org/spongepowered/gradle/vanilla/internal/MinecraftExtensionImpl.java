@@ -39,22 +39,31 @@ import org.gradle.util.ConfigureUtil;
 import org.spongepowered.gradle.vanilla.MinecraftExtension;
 import org.spongepowered.gradle.vanilla.internal.model.VersionClassifier;
 import org.spongepowered.gradle.vanilla.internal.model.VersionDescriptor;
+import org.spongepowered.gradle.vanilla.internal.repository.modifier.StaticInjectorModifier;
+import org.spongepowered.gradle.vanilla.internal.util.GsonUtils;
 import org.spongepowered.gradle.vanilla.repository.MinecraftPlatform;
 import org.spongepowered.gradle.vanilla.internal.repository.MinecraftProviderService;
 import org.spongepowered.gradle.vanilla.internal.repository.MinecraftRepositoryPlugin;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.AccessWidenerModifier;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.ArtifactModifier;
+import org.spongepowered.gradle.vanilla.resolver.Downloader;
+import org.spongepowered.gradle.vanilla.resolver.HashAlgorithm;
+import org.spongepowered.gradle.vanilla.resolver.ResolutionResult;
 import org.spongepowered.gradle.vanilla.runs.RunConfiguration;
 import org.spongepowered.gradle.vanilla.runs.RunConfigurationContainer;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import javax.inject.Inject;
@@ -69,6 +78,7 @@ public class MinecraftExtensionImpl implements MinecraftExtension {
     private final DirectoryProperty sharedCache;
     private final DirectoryProperty projectCache;
     private final ConfigurableFileCollection accessWideners;
+    private final ConfigurableFileCollection staticInjectors;
 
     // Derived properties
     private final Property<VersionDescriptor.Full> targetVersion;
@@ -76,17 +86,20 @@ public class MinecraftExtensionImpl implements MinecraftExtension {
 
     // Internals
     private final Project project;
+    private final Downloader downloader;
     private final RunConfigurationContainer runConfigurations;
     private volatile Set<ArtifactModifier> lazyModifiers;
 
     @Inject
-    public MinecraftExtensionImpl(final Gradle gradle, final ObjectFactory factory, final Project project, final Provider<MinecraftProviderService> providerService) {
+    public MinecraftExtensionImpl(final Gradle gradle, final ObjectFactory factory, final Project project, final Provider<MinecraftProviderService> providerService, final Downloader downloader) {
         this.project = project;
         this.providerService = providerService;
+        this.downloader = downloader;
         this.version = factory.property(String.class);
         this.platform = factory.property(MinecraftPlatform.class).convention(MinecraftPlatform.JOINED);
         this.injectRepositories = factory.property(Boolean.class).convention(project.provider(() -> !gradle.getPlugins().hasPlugin(MinecraftRepositoryPlugin.class))); // only inject if we aren't already in Settings
         this.accessWideners = factory.fileCollection();
+        this.staticInjectors = factory.fileCollection();
 
         this.assetsDirectory = factory.directoryProperty();
         this.sharedCache = factory.directoryProperty().convention(providerService.flatMap(it -> it.getParameters().getSharedCache()));
@@ -110,6 +123,15 @@ public class MinecraftExtensionImpl implements MinecraftExtension {
         this.targetVersion = factory.property(VersionDescriptor.Full.class)
             .value(this.version.zip(this.providerService, (version, service) -> {
                 try {
+//                     Mald Gradle: allow for specifying links to custom version manifests.
+//                    try {
+//                        URL manifestUrl = new URL(this.version.get());
+//                        CompletableFuture<ResolutionResult<VersionDescriptor.Full>> resolutionCompletableFuture = this.downloader.readString(
+//                                manifestUrl,
+//                                "versions/" + manifestUrl.hashCode() + ".json" // TODO: this should be handled better.
+//                        ).thenApply(res -> res.mapIfPresent((upToDate, content) -> GsonUtils.GSON.fromJson(content, VersionDescriptor.Full.class)));
+//                        return resolutionCompletableFuture.get();
+//                    } catch (MalformedURLException ignored) {}
                     return service.versions().fullVersion(version).get()
                         .orElseThrow(() -> {
                             try {
@@ -223,16 +245,29 @@ public class MinecraftExtensionImpl implements MinecraftExtension {
         this.accessWideners.from(files);
     }
 
+    @Override
+    public void staticInjectors(Object... files) {
+        this.staticInjectors.from(files);
+    }
+
     public ConfigurableFileCollection accessWideners() {
         return this.accessWideners;
+    }
+
+    public ConfigurableFileCollection staticInjectors() {
+        return this.staticInjectors;
     }
 
     public synchronized Set<ArtifactModifier> modifiers() {
         if (this.lazyModifiers == null) {
             this.accessWideners.disallowChanges();
+            this.staticInjectors.disallowChanges();
             final Set<ArtifactModifier> modifiers = new HashSet<>();
             if (!this.accessWideners.isEmpty()) {
                 modifiers.add(new AccessWidenerModifier(this.accessWideners.getFiles()));
+            }
+            if (!this.staticInjectors.isEmpty()) {
+                modifiers.add(new StaticInjectorModifier(this.staticInjectors.getFiles()));
             }
             return this.lazyModifiers = Collections.unmodifiableSet(modifiers);
         }

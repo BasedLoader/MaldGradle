@@ -65,6 +65,7 @@ import org.spongepowered.gradle.vanilla.internal.repository.MinecraftProviderSer
 import org.spongepowered.gradle.vanilla.repository.MinecraftRepositoryExtension;
 import org.spongepowered.gradle.vanilla.internal.repository.MinecraftRepositoryPlugin;
 import org.spongepowered.gradle.vanilla.repository.MinecraftSide;
+import org.spongepowered.gradle.vanilla.resolver.apache.ApacheHttpDownloader;
 import org.spongepowered.gradle.vanilla.runs.ClientRunParameterTokens;
 import org.spongepowered.gradle.vanilla.task.DecompileJarTask;
 import org.spongepowered.gradle.vanilla.task.DownloadAssetsTask;
@@ -75,6 +76,7 @@ import org.spongepowered.gradle.vanilla.internal.util.StringUtils;
 import java.io.File;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A plugin that creates the necessary tasks and configurations to provide the
@@ -92,7 +94,7 @@ public class ProvideMinecraftPlugin implements Plugin<Project> {
         final Provider<MinecraftProviderService> minecraftProvider = target.getPlugins().getPlugin(MinecraftRepositoryPlugin.class).service();
 
         final MinecraftExtensionImpl minecraft = (MinecraftExtensionImpl) target.getExtensions()
-            .create(MinecraftExtension.class, "minecraft", MinecraftExtensionImpl.class, target, minecraftProvider);
+            .create(MinecraftExtension.class, "minecraft", MinecraftExtensionImpl.class, target, minecraftProvider, ApacheHttpDownloader.uncached(ForkJoinPool.commonPool()));
 
         final NamedDomainObjectProvider<Configuration> minecraftConfig = target.getConfigurations().register(Constants.Configurations.MINECRAFT, config -> {
             config.setVisible(false);

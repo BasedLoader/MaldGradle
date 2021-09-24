@@ -114,6 +114,16 @@ public interface MinecraftExtension extends MinecraftRepositoryExtension {
     void accessWideners(Object... file);
 
     /**
+     * Apply static injectors to the project.
+     *
+     * <p>Static Injectors can only be added before the first time a Minecraft
+     * dependency is resolved.</p>
+     *
+     * @param file any file that can be passed to {@link Project#file(Object)}
+     */
+    void staticInjectors(Object... file);
+
+    /**
      * Get run configurations configured for this project.
      *
      * <p>Every run configuration will automatically have Minecraft on its classpath.</p>

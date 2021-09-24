@@ -7,8 +7,8 @@ plugins {
     id("com.diffplug.eclipse.apt") apply false
 }
 
-group = "org.spongepowered"
-version = "0.2.1-SNAPSHOT"
+group = "com.maldloader"
+version = "0.2.1-TEST6"
 
 subprojects {
     apply(plugin="net.kyori.indra")
@@ -30,7 +30,7 @@ subprojects {
         mitLicense()
 
         javaVersions {
-            testWith(8, 11, 16)
+            testWith(8, 16)
         }
 
         configurePublications {

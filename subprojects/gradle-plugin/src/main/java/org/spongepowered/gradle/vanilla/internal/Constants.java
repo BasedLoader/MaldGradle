@@ -138,6 +138,7 @@ public final class Constants {
         public static final String FORGE_FLOWER = "forgeFlower";
         public static final String CLASS_DUMP = "classDump";
 
+
         private Configurations() {
         }
     }

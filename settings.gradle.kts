@@ -34,4 +34,3 @@ sequenceOf("resolver-core", "downloader-apache-http", "downloader-jdk-http").for
         projectDir = file("subprojects/$it")
     }
 }
-include("testing")

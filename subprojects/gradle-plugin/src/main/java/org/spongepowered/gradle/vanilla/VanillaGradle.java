@@ -127,7 +127,7 @@ public final class VanillaGradle implements Plugin<Object> {
         });
     }
 
-    private void createDumpClass(
+	private void createDumpClass(
         final Project project, final NamedDomainObjectProvider<Configuration> minecraftConfig
     ) {
         final NamedDomainObjectProvider<Configuration> asmUtilConfiguration = project.getConfigurations().register(Constants.Configurations.CLASS_DUMP, config -> {

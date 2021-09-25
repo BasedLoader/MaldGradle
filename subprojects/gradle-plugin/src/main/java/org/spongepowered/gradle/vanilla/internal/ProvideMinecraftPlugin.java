@@ -159,7 +159,7 @@ public class ProvideMinecraftPlugin implements Plugin<Project> {
         final Provider<MinecraftProviderService> minecraftProvider,
         final MinecraftExtensionImpl extension
     ) {
-        final Configuration forgeFlower = this.project.getConfigurations().maybeCreate(Constants.Configurations.FORGE_FLOWER);
+        final Configuration forgeFlower = this.project.getConfigurations().maybeCreate(Constants.Configurations.DECOMPILER);
         forgeFlower.defaultDependencies(deps -> deps.add(this.project.getDependencies().create(Constants.WorkerDependencies.FORGE_FLOWER)));
         final FileCollection forgeFlowerClasspath = forgeFlower.getIncoming().getFiles();
         final Provider<ArtifactCollection> minecraftActifacts = minecraftConfiguration.map(mc -> mc.getIncoming().getArtifacts());

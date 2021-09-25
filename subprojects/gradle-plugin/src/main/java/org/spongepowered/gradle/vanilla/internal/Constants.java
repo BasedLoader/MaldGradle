@@ -135,8 +135,9 @@ public final class Constants {
         public static final String MINECRAFT_NATIVES = "minecraftNatives";
         public static final String MERGETOOL = "mergetool";
         public static final String ACCESS_WIDENER = "accessWidener";
-        public static final String FORGE_FLOWER = "forgeFlower";
+        public static final String DECOMPILER = "forgeFlower";
         public static final String CLASS_DUMP = "classDump";
+		public static final String INCLUDE_RUNTIME = "includeRuntime";
 
 
         private Configurations() {

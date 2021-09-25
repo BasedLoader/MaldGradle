@@ -163,6 +163,26 @@ public class RunConfiguration implements Named {
         return this.ideaSourceSet;
     }
 
+	/**
+	 * Sets a jvm property with a boolean value.
+	 * @param property the property you are trying to set
+	 * @param value the value of that property
+	 */
+	@Input
+	public void setVariable(String property, boolean value) {
+		setVariable(property, Boolean.toString(value));
+	}
+
+	/**
+	 * Sets a jvm property with a {@link String} value.
+	 * @param property the property you are trying to set
+	 * @param value the value of that property
+	 */
+	@Input
+	public void setVariable(String property, String value) {
+		jvmArgs("-D" + property + "=" + value);
+	}
+
     @Nested
     public List<CommandLineArgumentProvider> getAllArgumentProviders() {
         return this.allArgs;

@@ -37,6 +37,7 @@ import org.gradle.api.NamedDomainObjectSet;
 import org.gradle.api.Namer;
 import org.gradle.api.Rule;
 import org.gradle.api.UnknownDomainObjectException;
+import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.internal.NamedDomainObjectContainerConfigureDelegate;
 import org.gradle.api.provider.MapProperty;
 import org.gradle.api.provider.Provider;
@@ -44,12 +45,13 @@ import org.gradle.api.specs.Spec;
 import org.gradle.jvm.toolchain.JavaLanguageVersion;
 import org.gradle.util.ConfigureUtil;
 import org.spongepowered.gradle.vanilla.internal.MinecraftExtensionImpl;
-import org.spongepowered.gradle.vanilla.internal.model.Argument;
-import org.spongepowered.gradle.vanilla.internal.model.Arguments;
-import org.spongepowered.gradle.vanilla.internal.model.JavaRuntimeVersion;
-import org.spongepowered.gradle.vanilla.internal.model.VersionDescriptor;
+import org.spongepowered.gradle.vanilla.internal.model.*;
+import org.spongepowered.gradle.vanilla.internal.model.rule.OperatingSystemRule;
 import org.spongepowered.gradle.vanilla.internal.model.rule.RuleContext;
 
+import java.io.File;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -59,10 +61,17 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.SortedSet;
+import java.util.stream.Collectors;
 
 import javax.inject.Inject;
 
 public class RunConfigurationContainer implements NamedDomainObjectContainer<RunConfiguration> {
+	private static final String DEV_ARGUMENT = "mald.dev";
+	private static final String MAIN_ARGUMENT = "mald.main";
+	private static final String LOADER_MODS_ARGUMENT = "mald.loader.mods";
+	private static final String MC_MODS_ARGUMENT = "mald.mc.mods";
+	private static final String MODS_ARGUMENT = "mald.mods";
+	private static final String CLIENT_ARGUMENT = "mald.mc.isClient";
     private final NamedDomainObjectContainer<RunConfiguration> delegate;
     private final MinecraftExtensionImpl extension;
 
@@ -110,8 +119,7 @@ public class RunConfigurationContainer implements NamedDomainObjectContainer<Run
      *     configuration
      * @return a provider for the configuration
      */
-    public NamedDomainObjectProvider<RunConfiguration> client(final String taskName,
-            final @Nullable Action<? super RunConfiguration> configureAction) {
+    public NamedDomainObjectProvider<RunConfiguration> client(final String taskName, final @Nullable Action<? super RunConfiguration> configureAction) {
         final NamedDomainObjectProvider<RunConfiguration> config;
         if (this.getNames().contains(taskName)) {
             config = this.named(taskName);
@@ -126,7 +134,7 @@ public class RunConfigurationContainer implements NamedDomainObjectContainer<Run
 
     private Action<RunConfiguration> configureClientRun() {
         return config -> {
-            config.getMainClass().set(this.extension.targetVersion().map(VersionDescriptor.Full::mainClass));
+            config.getMainClass().set("com.maldloader.MinecraftPlugin");
             config.getRequiresAssetsAndNatives().set(true);
             final MapProperty<String, String> launcherTokens = config.getParameterTokens();
             launcherTokens.put(ClientRunParameterTokens.VERSION_NAME, this.extension.targetVersion().map(VersionDescriptor.Full::id));
@@ -154,7 +162,25 @@ public class RunConfigurationContainer implements NamedDomainObjectContainer<Run
                 final @Nullable JavaRuntimeVersion manifestRuntime = version.javaVersion();
                 return JavaLanguageVersion.of(manifestRuntime == null ? JavaVersion.current().ordinal() + 1 : manifestRuntime.majorVersion());
             }));
-        };
+
+			String buildDir = extension.project.getBuildDir().getAbsolutePath();
+			String classPath = extension.project.getConfigurations().getByName("minecraft").resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";"));
+			for (Dependency dependency : extension.project.getConfigurations().getByName("minecraft").getDependencies()) {
+				classPath += ";" + dependency;
+			}
+			String testModules = Paths.get(buildDir, "resources/test") + "|" +
+					Paths.get(buildDir, "classes/java/test");
+
+			String mainModules = Paths.get(buildDir, "resources/main") + "|" +
+					Paths.get(buildDir, "classes/java/main");
+
+			config.setVariable(MODS_ARGUMENT, mainModules + ";" + this.extension.project.getConfigurations().getByName("includeRuntime").resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";")));
+			config.setVariable(LOADER_MODS_ARGUMENT, testModules);
+			config.setVariable(MC_MODS_ARGUMENT, classPath);
+			config.setVariable(DEV_ARGUMENT, true);
+			config.setVariable(CLIENT_ARGUMENT, true);
+			config.setVariable(MAIN_ARGUMENT, "client"); //TODO: datagen config
+		};
     }
 
     /**

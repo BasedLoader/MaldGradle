@@ -85,7 +85,7 @@ public class MinecraftExtensionImpl implements MinecraftExtension {
     private final DirectoryProperty assetsDirectory;
 
     // Internals
-    private final Project project;
+    public final Project project;
     private final Downloader downloader;
     private final RunConfigurationContainer runConfigurations;
     private volatile Set<ArtifactModifier> lazyModifiers;

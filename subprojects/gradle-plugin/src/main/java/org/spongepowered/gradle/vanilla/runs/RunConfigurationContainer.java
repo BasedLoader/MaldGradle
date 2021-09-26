@@ -37,6 +37,7 @@ import org.gradle.api.NamedDomainObjectSet;
 import org.gradle.api.Namer;
 import org.gradle.api.Rule;
 import org.gradle.api.UnknownDomainObjectException;
+import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.internal.NamedDomainObjectContainerConfigureDelegate;
 import org.gradle.api.provider.MapProperty;
@@ -164,8 +165,9 @@ public class RunConfigurationContainer implements NamedDomainObjectContainer<Run
             }));
 
 			String buildDir = extension.project.getBuildDir().getAbsolutePath();
-			String classPath = extension.project.getConfigurations().getByName("minecraft").resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";"));
-			for (Dependency dependency : extension.project.getConfigurations().getByName("minecraft").getDependencies()) {
+			Configuration minecraftCopy = extension.project.getConfigurations().getByName("minecraft").copy(); //TODO: makes runs block have to be at bottom. need a better way.
+			String classPath = minecraftCopy.resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";"));
+			for (Dependency dependency : minecraftCopy.getDependencies()) {
 				classPath += ";" + dependency;
 			}
 			String testModules = Paths.get(buildDir, "resources/test") + "|" +

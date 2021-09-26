@@ -174,8 +174,10 @@ public class RunConfigurationContainer implements NamedDomainObjectContainer<Run
 			String mainModules = Paths.get(buildDir, "resources/main") + "|" +
 					Paths.get(buildDir, "classes/java/main");
 
-			config.setVariable(MODS_ARGUMENT, mainModules + ";" + this.extension.project.getConfigurations().getByName("includeRuntime").resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";")));
-			config.setVariable(LOADER_MODS_ARGUMENT, testModules);
+			String combinedModules = testModules + ";" + mainModules;
+
+			config.setVariable(MODS_ARGUMENT, combinedModules + ";" + this.extension.project.getConfigurations().getByName("includeRuntime").resolve().stream().map(File::getAbsolutePath).collect(Collectors.joining(";")));
+			config.setVariable(LOADER_MODS_ARGUMENT, combinedModules);
 			config.setVariable(MC_MODS_ARGUMENT, classPath);
 			config.setVariable(DEV_ARGUMENT, true);
 			config.setVariable(CLIENT_ARGUMENT, true);

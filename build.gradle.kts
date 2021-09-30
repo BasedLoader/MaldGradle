@@ -45,8 +45,8 @@ subprojects {
         if (
             project.hasProperty("maven_url")
         ) {
-            publishSnapshotsTo("maven", project.property("maven") as String)
-            publishReleasesTo("maven", project.property("maven") as String)
+            publishSnapshotsTo("maven", project.property("maven_url") as String)
+//            publishReleasesTo("maven", project.property("maven_url") as String)
         }
     }
 

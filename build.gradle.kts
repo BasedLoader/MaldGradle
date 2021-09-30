@@ -43,10 +43,10 @@ subprojects {
         }
 
         if (
-            project.hasProperty("maldRepo")
+            project.hasProperty("maven_url")
         ) {
-            publishSnapshotsTo("maldloader", project.property("maldRepo") as String)
-            publishReleasesTo("maldloader", project.property("maldRepo") as String)
+            publishSnapshotsTo("maven", project.property("maven") as String)
+            publishReleasesTo("maven", project.property("maven") as String)
         }
     }
 
@@ -62,29 +62,14 @@ subprojects {
         header(rootProject.file("HEADER.txt"))
     }
 
-    afterEvaluate {
-        extensions.configure(SigningExtension::class) {
-            val spongeSigningKey = project.findProperty("spongeSigningKey") as String?
-            val spongeSigningPassword = project.findProperty("spongeSigningPassword") as String?
-            if (spongeSigningKey != null && spongeSigningPassword != null) {
-                val keyFile = rootProject.file(spongeSigningKey)
-                if (keyFile.exists()) {
-                    useInMemoryPgpKeys(keyFile.readText(Charsets.UTF_8), spongeSigningPassword)
-                } else {
-                    useInMemoryPgpKeys(spongeSigningKey, spongeSigningPassword)
-                }
-            } else {
-                signatories = PgpSignatoryProvider() // don't use gpg agent
-            }
-        }
-    }
-
     tasks {
+        val organization: String by project
+
         withType(Jar::class).configureEach {
             // project.extensions.getByType(net.kyori.indra.git.IndraGitExtension::class).applyVcsInformationToManifest(manifest)
             manifest.attributes(
                 "Specification-Title" to "VanillaGradle",
-                "Specification-Vendor" to "SpongePowered",
+                "Specification-Vendor" to organization,
                 "Specification-Version" to project.version,
                 "Implementation-Title" to project.name,
                 "Implementation-Version" to project.version,

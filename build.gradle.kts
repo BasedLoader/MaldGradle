@@ -21,10 +21,6 @@ subprojects {
         maven("https://repo.spongepowered.org/repository/maven-public/") {
             name = "sponge"
         }
-
-        maven ("https://maven.parchmentmc.org/") {
-            name = "ParchmentMC"
-        }
     }
 
     extensions.configure(net.kyori.indra.IndraExtension::class) {

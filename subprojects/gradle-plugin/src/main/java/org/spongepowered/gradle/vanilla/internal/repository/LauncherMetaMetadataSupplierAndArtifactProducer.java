@@ -37,7 +37,6 @@ import org.spongepowered.gradle.vanilla.repository.MinecraftPlatform;
 import org.spongepowered.gradle.vanilla.repository.MinecraftResolver;
 import org.spongepowered.gradle.vanilla.resolver.ResolutionResult;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -76,7 +75,7 @@ public class LauncherMetaMetadataSupplierAndArtifactProducer implements Componen
             // Request the appropriate jar, block until it's provided
             // TODO: maybe validate that the state keys of the provided modifiers actually match the artifact ID?
             final ResolutionResult<MinecraftResolver.MinecraftEnvironment>
-                resolution = resolver.provide(platform.get(), version, providerService.peekModifiers(), providerService.peekMappings()).get();
+                resolution = resolver.provide(platform.get(), version, providerService.peekModifiers()).get();
             if (!resolution.isPresent()) {
                 return;
             }

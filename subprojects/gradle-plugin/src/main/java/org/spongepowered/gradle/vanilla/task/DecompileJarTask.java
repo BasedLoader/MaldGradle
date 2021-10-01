@@ -56,7 +56,10 @@ import org.spongepowered.gradle.vanilla.internal.worker.JarDecompileWorker;
 import java.io.File;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.locks.ReentrantLock;
@@ -126,11 +129,10 @@ public abstract class DecompileJarTask extends DefaultTask {
         final CompletableFuture<ResolutionResult<Path>> resultFuture;
         try {
             final MinecraftProviderService minecraftProvider = this.getMinecraftProvider().get();
-            MinecraftExtensionImpl minecraft = ((MinecraftExtensionImpl) this.getProject().getExtensions().getByType(MinecraftExtension.class));
-            final Set<ArtifactModifier> modifiers = minecraft.modifiers();
-            final List<String> mappings = minecraft.mappings();
+            final Set<ArtifactModifier> modifiers =
+                ((MinecraftExtensionImpl) this.getProject().getExtensions().getByType(MinecraftExtension.class)).modifiers();
 
-            minecraftProvider.primeResolver(this.getProject(), modifiers, mappings);
+            minecraftProvider.primeResolver(this.getProject(), modifiers);
             final Set<AssociatedResolutionFlags> flags = EnumSet.of(AssociatedResolutionFlags.MODIFIES_ORIGINAL);
             if (this.getForced().getOrElse(false)) {
                 flags.add(AssociatedResolutionFlags.FORCE_REGENERATE);
@@ -138,47 +140,50 @@ public abstract class DecompileJarTask extends DefaultTask {
             resultFuture = minecraftProvider.resolver().produceAssociatedArtifactSync(
                 this.getMinecraftPlatform().get(),
                 this.getMinecraftVersion().get(),
-                modifiers, mappings, flags, (env, output) -> {
-                        // Determine which parts of the configuration are MC, and which are its dependencies
-                        final Set<File> dependencies = new HashSet<>();
-                        for (final ResolvedArtifactResult artifact : this.getInputArtifacts().get()) {
-                            if (artifact.getId() instanceof ModuleComponentArtifactIdentifier) {
-                                final ModuleComponentArtifactIdentifier id = (ModuleComponentArtifactIdentifier) artifact.getId();
-                                if (id.getComponentIdentifier().getGroup().equals(MinecraftPlatform.GROUP)) {
-                                    if (env.decoratedArtifactId().equals(id.getComponentIdentifier().getModule())) {
-                                        continue;
-                                    }
+                modifiers,
+                "sources",
+                flags,
+                (env, output) -> {
+                    // Determine which parts of the configuration are MC, and which are its dependencies
+                    final Set<File> dependencies = new HashSet<>();
+                    for (final ResolvedArtifactResult artifact : this.getInputArtifacts().get()) {
+                        if (artifact.getId() instanceof ModuleComponentArtifactIdentifier) {
+                            final ModuleComponentArtifactIdentifier id = (ModuleComponentArtifactIdentifier) artifact.getId();
+                            if (id.getComponentIdentifier().getGroup().equals(MinecraftPlatform.GROUP)) {
+                                if (env.decoratedArtifactId().equals(id.getComponentIdentifier().getModule())) {
+                                    continue;
                                 }
                             }
-                            dependencies.add(artifact.getFile());
                         }
+                        dependencies.add(artifact.getFile());
+                    }
 
-                        if (dependencies.isEmpty()) {
-                            throw new InvalidUserDataException("No dependencies were found as part of the classpath");
-                        }
+                    if (dependencies.isEmpty()) {
+                        throw new InvalidUserDataException("No dependencies were found as part of the classpath");
+                    }
 
-                        // Execute in an isolated JVM that can access our customized classpath
-                        // This actually performs the decompile
-                        final long totalSystemMemoryBytes =
-                            ((OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean()).getTotalPhysicalMemorySize() / (1024L * 1024L);
-                        this.getWorkerExecutor().processIsolation(spec -> {
-                            spec.forkOptions(options -> {
-                                options.setMaxHeapSize(Math.max(totalSystemMemoryBytes / 4, 4096) + "M");
-                                // Enable toolchain support
-                                if (this.getJavaLauncher().isPresent()) {
-                                    final JavaLauncher launcher = this.getJavaLauncher().get();
-                                    options.setExecutable(launcher.getExecutablePath());
-                                }
-                            });
-                            spec.getClasspath().from(this.getWorkerClasspath());
-                        }).submit(JarDecompileWorker.class, parameters -> {
-                            parameters.getDecompileClasspath().from(dependencies);
-                            parameters.getExtraArgs().set(this.getExtraFernFlowerArgs().orElse(Collections.emptyMap()));
-                            parameters.getInputJar().set(env.jar().toFile()); // Use the temporary jar
-                            parameters.getOutputJar().set(output.toFile());
+                    // Execute in an isolated JVM that can access our customized classpath
+                    // This actually performs the decompile
+                    final long totalSystemMemoryBytes =
+                        ((OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean()).getTotalPhysicalMemorySize() / (1024L * 1024L);
+                    this.getWorkerExecutor().processIsolation(spec -> {
+                        spec.forkOptions(options -> {
+                            options.setMaxHeapSize(Math.max(totalSystemMemoryBytes / 4, 4096) + "M");
+                            // Enable toolchain support
+                            if (this.getJavaLauncher().isPresent()) {
+                                final JavaLauncher launcher = this.getJavaLauncher().get();
+                                options.setExecutable(launcher.getExecutablePath());
+                            }
                         });
-                        this.getWorkerExecutor().await();
-                    }, "sources"
+                        spec.getClasspath().from(this.getWorkerClasspath());
+                    }).submit(JarDecompileWorker.class, parameters -> {
+                        parameters.getDecompileClasspath().from(dependencies);
+                        parameters.getExtraArgs().set(this.getExtraFernFlowerArgs().orElse(Collections.emptyMap()));
+                        parameters.getInputJar().set(env.jar().toFile()); // Use the temporary jar
+                        parameters.getOutputJar().set(output.toFile());
+                    });
+                    this.getWorkerExecutor().await();
+                }
             );
         } finally {
             DecompileJarTask.DECOMPILE_LOCK.unlock();

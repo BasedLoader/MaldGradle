@@ -33,8 +33,6 @@ import org.spongepowered.gradle.vanilla.repository.MinecraftPlatform;
 import org.spongepowered.gradle.vanilla.repository.MinecraftRepositoryExtension;
 import org.spongepowered.gradle.vanilla.runs.RunConfigurationContainer;
 
-import java.util.List;
-
 /**
  * Properties that can configure how VanillaGradle applies Minecraft to the
  * current project.
@@ -69,7 +67,7 @@ public interface MinecraftExtension extends MinecraftRepositoryExtension {
      * available in the ordinary version list, such as combat snapshots.</p>
      *
      * @param versionFile a file-like object that can be handled
-     *                    by {@link Project#file(Object)}
+     *     by {@link Project#file(Object)}
      */
     void injectedVersion(Object versionFile);
 
@@ -114,18 +112,6 @@ public interface MinecraftExtension extends MinecraftRepositoryExtension {
      * @param file any file that can be passed to {@link Project#file(Object)}
      */
     void accessWideners(Object... file);
-
-    /**
-     * Apply mappings to Minecraft: Java Edition.
-
-     * <p>mappings can only be added before the first time a Minecraft
-     * dependency is resolved.</p>
-     *
-     * @param dependency any dependency pointing ot mappings. for example "net.fabricmc:yarn:1.16.5+build.1"
-     */
-    void mappings(String... dependency);
-
-    List<String> mappings();
 
     /**
      * Apply static injectors to the project.

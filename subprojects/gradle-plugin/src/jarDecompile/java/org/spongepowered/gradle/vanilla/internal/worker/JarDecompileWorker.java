@@ -30,6 +30,7 @@ import org.gradle.api.provider.MapProperty;
 import org.gradle.workers.WorkAction;
 import org.gradle.workers.WorkParameters;
 import org.jetbrains.java.decompiler.main.Fernflower;
+import org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler;
 import org.jetbrains.java.decompiler.main.extern.IFernflowerPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,7 +87,7 @@ public abstract class JarDecompileWorker implements WorkAction<JarDecompileWorke
         try (final Decompilation.VanillaGradleBytecodeProvider bytecode = Decompilation.bytecodeFromJar()) {
             final Fernflower decompiler = new Fernflower(
                 bytecode,
-                new LineMappingResultSaver(input.getAbsolutePath(), params.getOutputJar().get().getAsFile(), bytecode),
+                ConsoleDecompiler.SaveType.FILE.getSaver().apply(params.getOutputJar().get().getAsFile()),  //FIXME: this broke with quilt flower. new LineMappingResultSaver(input.getAbsolutePath(), params.getOutputJar().get().getAsFile(), bytecode),
                 ffArgs,
                 new SLF4JFernFlowerLogger(JarDecompileWorker.LOGGER)
             );

@@ -23,6 +23,7 @@
  * THE SOFTWARE.
  */
 package org.spongepowered.gradle.vanilla.internal.worker;
+/*
 
 import org.jetbrains.java.decompiler.main.decompiler.ThreadSafeResultSaver;
 import org.objectweb.asm.ClassReader;
@@ -68,3 +69,4 @@ public class LineMappingResultSaver extends ThreadSafeResultSaver {
     }
 
 }
+*/

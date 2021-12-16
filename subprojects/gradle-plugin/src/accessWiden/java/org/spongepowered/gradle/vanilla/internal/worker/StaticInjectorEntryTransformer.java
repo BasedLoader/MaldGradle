@@ -25,10 +25,7 @@
 package org.spongepowered.gradle.vanilla.internal.worker;
 
 import com.maldloader.staticinjector.StaticInjector;
-import net.fabricmc.accesswidener.AccessWidener;
-import net.fabricmc.accesswidener.AccessWidenerVisitor;
-import org.cadixdev.bombe.jar.JarClassEntry;
-import org.cadixdev.bombe.jar.JarEntryTransformer;
+import net.minecraftforge.fart.api.Transformer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -37,7 +34,7 @@ import org.objectweb.asm.Opcodes;
 import java.util.Arrays;
 import java.util.List;
 
-final class StaticInjectorEntryTransformer implements JarEntryTransformer {
+final class StaticInjectorEntryTransformer implements Transformer {
     private final StaticInjector staticInjector;
 
     public StaticInjectorEntryTransformer(final StaticInjector staticInjector) {
@@ -45,10 +42,10 @@ final class StaticInjectorEntryTransformer implements JarEntryTransformer {
     }
 
     @Override
-    public JarClassEntry transform(final JarClassEntry entry) {
+    public ClassEntry process(final ClassEntry entry) {
         // Because InnerClass attributes can be present in any class SI'd classes
         // are referenced from, we have to target every class to get a correct output.
-        final ClassReader reader = new ClassReader(entry.getContents());
+        final ClassReader reader = new ClassReader(entry.getData());
         final ClassWriter writer = new ClassWriter(reader, 0);
         // TODO: Expose the ASM version constant somewhere visible to this worker
         reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
@@ -58,16 +55,16 @@ final class StaticInjectorEntryTransformer implements JarEntryTransformer {
                 if(newInterfaces != null) {
                     int oldLength = interfaces.length;
                     interfaces = Arrays.copyOf(interfaces, interfaces.length + newInterfaces.size());
+                    StringBuilder signatureBuilder = new StringBuilder(signature);
                     for (int i = 0; i < newInterfaces.size(); i++) {
                         interfaces[oldLength + i] = newInterfaces.get(i);
-                        if(signature != null) {
-                            signature += "L" + newInterfaces.get(i) + ";";
-                        }
+                        signatureBuilder.append("L").append(newInterfaces.get(i)).append(";");
                     }
+                    signature = signatureBuilder.toString();
                 }
                 super.visit(version, access, name, signature, superName, interfaces);
             }
         }, 0);
-        return new JarClassEntry(entry.getName(), entry.getTime(), writer.toByteArray());
+        return ClassEntry.create(entry.getName(), entry.getTime(), writer.toByteArray());
     }
 }

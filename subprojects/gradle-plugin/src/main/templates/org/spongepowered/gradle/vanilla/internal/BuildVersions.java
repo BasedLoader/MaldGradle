@@ -33,7 +33,7 @@ class BuildVersions {
     }
 
     public static final String ASM = "${asmVersion}";
-    public static final String FORGEFLOWER = "${forgeFlowerVersion}";
+    public static final String QUILT_FLOWER = "${quiltFlowerVersion}";
     public static final String MERGE_TOOL = "${mergeToolVersion}";
     public static final String ACCESS_WIDENER = "${accessWidenerVersion}";
 

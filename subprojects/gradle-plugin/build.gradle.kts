@@ -29,7 +29,7 @@ configurations {
 
 val accessWidenerVersion: String by project
 val asmVersion: String by project
-val forgeFlowerVersion: String by project
+val quiltFlowerVersion: String by project
 val forgeAutoRenamingToolVersion: String by project
 val junitVersion: String by project
 val mergeToolVersion: String by project
@@ -65,7 +65,7 @@ dependencies {
     implementation(jarMerge.output)
 
     // Jar decompile worker (match with Constants)
-    "jarDecompileCompileOnly"("net.minecraftforge:forgeflower:$forgeFlowerVersion")
+    "jarDecompileCompileOnly"("org.quiltmc:quiltflower:$quiltFlowerVersion")
     implementation(jarDecompile.output)
 
     // Access widener worker (match with Constants)
@@ -91,7 +91,7 @@ tasks {
         description = "Generate classes from templates for VanillaGradle"
         val properties = mutableMapOf(
                 "asmVersion" to asmVersion,
-                "forgeFlowerVersion" to forgeFlowerVersion,
+                "quiltFlowerVersion" to quiltFlowerVersion,
                 "mergeToolVersion" to mergeToolVersion,
                 "accessWidenerVersion" to accessWidenerVersion
         )

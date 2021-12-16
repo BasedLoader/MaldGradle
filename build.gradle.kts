@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.maldloader"
-version = "0.3.3"
+version = "0.3.4"
 
 subprojects {
     apply(plugin="net.kyori.indra")

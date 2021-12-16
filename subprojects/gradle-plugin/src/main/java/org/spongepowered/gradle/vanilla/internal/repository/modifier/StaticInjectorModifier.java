@@ -24,8 +24,7 @@
  */
 package org.spongepowered.gradle.vanilla.internal.repository.modifier;
 
-import org.cadixdev.atlas.AtlasTransformerContext;
-import org.cadixdev.bombe.jar.JarEntryTransformer;
+import net.minecraftforge.fart.api.Transformer;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.gradle.vanilla.internal.repository.ResolvableTool;
@@ -87,13 +86,13 @@ public final class StaticInjectorModifier implements ArtifactModifier {
 
     @Override
     @SuppressWarnings("unchecked")
-    public CompletableFuture<AtlasPopulator> providePopulator(
+    public CompletableFuture<TransformerProvider> providePopulator(
         final MinecraftResolver.Context context
     ) {
         final Supplier<URLClassLoader> loaderProvider = context.classLoaderWithTool(ResolvableTool.ACCESS_WIDENER);
-        return AsyncUtils.failableFuture(() -> new AtlasPopulator() {
+        return AsyncUtils.failableFuture(() -> new TransformerProvider() {
             private final URLClassLoader loader = loaderProvider.get();
-            private @Nullable Function<Set<Path>, JarEntryTransformer> accessWidenerLoader = (Function<Set<Path>, JarEntryTransformer>) Class.forName(
+            private @Nullable Function<Set<Path>, Transformer> accessWidenerLoader = (Function<Set<Path>, Transformer>) Class.forName(
                 "org.spongepowered.gradle.vanilla.internal.worker.StaticInjectorTransformerProvider",
                 true,
                 this.loader
@@ -102,7 +101,7 @@ public final class StaticInjectorModifier implements ArtifactModifier {
                 .newInstance();
 
             @Override
-            public JarEntryTransformer provide(final AtlasTransformerContext context) {
+            public Transformer provide() {
                 if (this.accessWidenerLoader == null) {
                     throw new IllegalStateException("Already closed!");
                 }

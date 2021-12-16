@@ -70,6 +70,8 @@ public abstract class GenEclipseRuns extends DefaultTask {
             try (final EclipseRunConfigurationWriter writer = new EclipseRunConfigurationWriter(output)) {
                 writer.projectName(this.getProjectName().get())
                     .write(run);
+
+                run.getWorkingDirectory().get().getAsFile().mkdirs();
             }
             wroteAny = true;
         }

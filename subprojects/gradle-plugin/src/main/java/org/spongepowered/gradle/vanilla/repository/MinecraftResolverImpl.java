@@ -24,43 +24,50 @@
  */
 package org.spongepowered.gradle.vanilla.repository;
 
-import org.cadixdev.atlas.Atlas;
-import org.cadixdev.lorenz.MappingSet;
-import org.cadixdev.lorenz.io.proguard.ProGuardReader;
+import net.minecraftforge.fart.api.Renamer;
+import net.minecraftforge.fart.api.SignatureStripperConfig;
+import net.minecraftforge.fart.api.SourceFixerConfig;
+import net.minecraftforge.fart.api.Transformer;
+import net.minecraftforge.srgutils.IMappingFile;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.gradle.api.GradleException;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongepowered.gradle.vanilla.internal.Constants;
+import org.spongepowered.gradle.vanilla.internal.bundler.BundlerMetadata;
 import org.spongepowered.gradle.vanilla.internal.model.Download;
+import org.spongepowered.gradle.vanilla.internal.model.GroupArtifactVersion;
 import org.spongepowered.gradle.vanilla.internal.model.VersionDescriptor;
 import org.spongepowered.gradle.vanilla.internal.model.VersionManifestRepository;
-import org.spongepowered.gradle.vanilla.internal.model.rule.RuleContext;
-import org.spongepowered.gradle.vanilla.resolver.Downloader;
-import org.spongepowered.gradle.vanilla.resolver.HashAlgorithm;
 import org.spongepowered.gradle.vanilla.internal.repository.IvyModuleWriter;
 import org.spongepowered.gradle.vanilla.internal.repository.ResolvableTool;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.ArtifactModifier;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.AssociatedResolutionFlags;
-import org.spongepowered.gradle.vanilla.internal.transformer.AtlasTransformers;
 import org.spongepowered.gradle.vanilla.internal.resolver.AsyncUtils;
 import org.spongepowered.gradle.vanilla.internal.resolver.FileUtils;
+import org.spongepowered.gradle.vanilla.internal.transformer.Transformers;
+import org.spongepowered.gradle.vanilla.internal.util.FunctionalUtils;
 import org.spongepowered.gradle.vanilla.internal.util.SelfPreferringClassLoader;
+import org.spongepowered.gradle.vanilla.resolver.Downloader;
+import org.spongepowered.gradle.vanilla.resolver.HashAlgorithm;
 import org.spongepowered.gradle.vanilla.resolver.ResolutionResult;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,7 +75,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
-import java.util.function.BiConsumer;
+import java.util.concurrent.SynchronousQueue;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -85,6 +93,8 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
     private final ConcurrentMap<EnvironmentKey, CompletableFuture<ResolutionResult<MinecraftEnvironment>>> artifacts = new ConcurrentHashMap<>();
     private final ConcurrentMap<EnvironmentKey, CompletableFuture<ResolutionResult<Path>>> associatedArtifacts = new ConcurrentHashMap<>();
     private final boolean forceRefresh;
+    private final BlockingQueue<Runnable> syncTasks = new SynchronousQueue<>();
+    private final Executor syncExecutor = run -> this.syncTasks.add(run);
 
     public MinecraftResolverImpl(
         final VersionManifestRepository manifests,
@@ -118,6 +128,11 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
     }
 
     @Override
+    public Executor syncExecutor() {
+        return this.syncExecutor;
+    }
+
+    @Override
     public Supplier<URLClassLoader> classLoaderWithTool(final ResolvableTool tool) {
         final @Nullable Function<ResolvableTool, URL[]> toolResolver = this.toolResolver;
         if (toolResolver == null) {
@@ -146,12 +161,14 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                 final Download jarDownload = descriptor.requireDownload(side.executableArtifact());
                 final Download mappingsDownload = descriptor.requireDownload(side.mappingsArtifact());
 
+                // download to temp path
+                final String tempJarPath = this.sharedArtifactFileName(platform.artifactId() + "_m-obf_b-bundled", version, null, "jar");
                 final String jarPath = this.sharedArtifactFileName(platform.artifactId() + "_m-obf", version, null, "jar");
                 final String mappingsPath = this.sharedArtifactFileName(platform.artifactId() + "_m-obf", version, "mappings", "txt");
 
                 final CompletableFuture<ResolutionResult<Path>> jarFuture = this.downloader.downloadAndValidate(
                     jarDownload.url(),
-                    jarPath,
+                    tempJarPath,
                     HashAlgorithm.SHA1,
                     jarDownload.sha1()
                 );
@@ -165,12 +182,19 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                 return jarFuture.thenCombineAsync(mappingsFuture, (jar, mappingsFile) -> {
                     try {
                         final boolean outputExists = Files.exists(outputJar);
+                        final @Nullable BundlerMetadata bundlerMeta = BundlerMetadata.read(jar.get()).orElse(null);
+                        if (bundlerMeta != null) {
+                            MinecraftResolverImpl.LOGGER.info("Resolved bundler metadata {} from jar at '{}'", bundlerMeta, jar.get());
+                        } else {
+                            MinecraftResolverImpl.LOGGER.info("No bundler metadata found in jar {}", jar.get());
+                        }
+                        final Supplier<Set<GroupArtifactVersion>> dependencies = () -> side.dependencies(descriptor, bundlerMeta);
                         if (!this.forceRefresh && jar.upToDate() && mappingsFile.upToDate() && outputExists) {
                             // Our inputs are up-to-date, and the output exists, so we can assume (for now) that the output is up-to-date
                             // Check meta here too, before returning
-                            this.writeMetaIfNecessary(platform, potentialDescriptor, outputJar.getParent());
+                            this.writeMetaIfNecessary(platform, potentialDescriptor, dependencies, outputJar.getParent());
                             // todo: eventually, store a hash along with the jar to compare to, for validation
-                            return ResolutionResult.result(new MinecraftEnvironmentImpl(platform.artifactId(), outputJar, descriptor), true);
+                            return ResolutionResult.result(new MinecraftEnvironmentImpl(platform.artifactId(), outputJar, dependencies, descriptor), true);
                         } else if (!jar.isPresent()) {
                             throw new IllegalArgumentException("No jar was available for Minecraft " + descriptor.id() + "side " + side.name()
                                 + "! Are you sure the data file is correct?");
@@ -183,30 +207,47 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
 
                         final Path outputTmp = Files.createTempDirectory("vanillagradle").resolve("output" + side.name() + ".jar");
                         FileUtils.createDirectoriesSymlinkSafe(outputJar.getParent());
-                        final MappingSet scratchMappings = MappingSet.create();
+
+                        // Extract jar
+                        final Path extracted = this.downloader.baseDir().resolve(jarPath);
+                        side.extractJar(jar.get(), extracted, bundlerMeta);
+
+                        final IMappingFile scratchMappings;
                         try (
-                            final ProGuardReader proguard = new ProGuardReader(Files.newBufferedReader(mappingsFile.get(), StandardCharsets.UTF_8))
+                            final InputStream reader = Files.newInputStream(mappingsFile.get())
                         ) {
-                            proguard.read(scratchMappings);
+                            scratchMappings = IMappingFile.load(reader);
                         } catch (final IOException ex) {
                             throw new GradleException("Failed to read mappings from " + mappingsFile, ex);
                         }
-                        final MappingSet mappings = scratchMappings.reverse();
+                        final IMappingFile mappings = scratchMappings.reverse();
 
-                        try (final Atlas atlas = new Atlas(this.executor)) {
-                            if (!side.allowedPackages().isEmpty()) {
-                                atlas.install(ctx -> AtlasTransformers.filterEntries(side.allowedPackages()));
-                            }
-                            atlas.install(ctx -> AtlasTransformers.stripSignatures());
-                            atlas.install(ctx -> AtlasTransformers.remap(mappings, ctx.inheritanceProvider()));
+                        final Renamer.Builder renamerBuilder = Renamer.builder();
 
-                            atlas.run(jar.get(), outputTmp);
+                        if (bundlerMeta == null && !side.allowedPackages().isEmpty()) {
+                            renamerBuilder.add(ctx -> Transformers.filterEntries(side.allowedPackages()));
                         }
-                        this.writeMetaIfNecessary(platform, potentialDescriptor, outputJar.getParent());
+                        renamerBuilder.add(Transformer.parameterAnnotationFixerFactory())
+                            .add(Transformers.fixLvNames())
+                            .add(Transformer.renamerFactory(mappings))
+                            .add(Transformer.sourceFixerFactory(SourceFixerConfig.JAVA))
+                            .add(Transformer.recordFixerFactory())
+                            .add(Transformer.signatureStripperFactory(SignatureStripperConfig.ALL))
+                            .add(Transformers.recordSignatureFixer()); // for versions where old PG produced invalid record signatures
+
+                        renamerBuilder.input(extracted.toFile())
+                        .output(outputTmp.toFile())
+                        .logger(MinecraftResolverImpl.LOGGER::info)
+                        // todo: threads
+                        // todo: dependencies
+                        .build()
+                        .run();
+
+                        this.writeMetaIfNecessary(platform, potentialDescriptor, dependencies, outputJar.getParent());
                         FileUtils.atomicMove(outputTmp, outputJar);
                         // not up-to-date, we had to generate the jar
                         MinecraftResolverImpl.LOGGER.warn("Successfully prepared Minecraft: Java Edition {} version {}", side, version);
-                        return ResolutionResult.result(new MinecraftEnvironmentImpl(platform.artifactId(), outputJar, descriptor), false);
+                        return ResolutionResult.result(new MinecraftEnvironmentImpl(platform.artifactId(), outputJar, dependencies, descriptor), false);
                     } catch (final IOException | XMLStreamException ex) {
                         throw new CompletionException(ex);
                     }
@@ -236,10 +277,16 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                     }
                     final VersionDescriptor.Full descriptor = potentialDescriptor.get();
                     final boolean outputExists = Files.isRegularFile(outputJar);
+                    final Supplier<Set<GroupArtifactVersion>> dependencies = () -> MinecraftResolverImpl.mergedDependencies(client.get(), server.get());
                     if (!this.forceRefresh && client.upToDate() && server.upToDate() && outputExists) {
                         // We're up-to-date, give meta a poke and then return without re-executing the jar merge
-                        this.writeMetaIfNecessary(MinecraftPlatform.JOINED, potentialDescriptor, outputJar.getParent());
-                        return ResolutionResult.result(new MinecraftEnvironmentImpl(MinecraftPlatform.JOINED.artifactId(), outputJar, descriptor), true);
+                        this.writeMetaIfNecessary(
+                            MinecraftPlatform.JOINED,
+                            potentialDescriptor,
+                            () -> MinecraftResolverImpl.mergedDependencies(client.get(), server.get()),
+                            outputJar.getParent()
+                        );
+                        return ResolutionResult.result(new MinecraftEnvironmentImpl(MinecraftPlatform.JOINED.artifactId(), outputJar, dependencies, descriptor), true);
                     }
                     MinecraftResolverImpl.LOGGER.warn("Preparing Minecraft: Java Edition JOINED version {}", version);
                     this.cleanAssociatedArtifacts(MinecraftPlatform.JOINED, version);
@@ -249,15 +296,22 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                     // apply jar merge worker as a (Path client, Path server, Path merged)
                     merge.execute(client.get().jar(), server.get().jar(), outputTmp);
 
-                    this.writeMetaIfNecessary(MinecraftPlatform.JOINED, potentialDescriptor, outputJar.getParent());
+                    this.writeMetaIfNecessary(MinecraftPlatform.JOINED, potentialDescriptor, dependencies, outputJar.getParent());
                     FileUtils.atomicMove(outputTmp, outputJar);
                     MinecraftResolverImpl.LOGGER.warn("Successfully prepared Minecraft: Java Edition JOINED version {}", version);
-                    return ResolutionResult.result(new MinecraftEnvironmentImpl(MinecraftPlatform.JOINED.artifactId(), outputJar, descriptor), false);
+                    return ResolutionResult.result(new MinecraftEnvironmentImpl(MinecraftPlatform.JOINED.artifactId(), outputJar, dependencies, descriptor), false);
                 } catch (final Exception ex) {
                     throw new CompletionException(ex);
                 }
             }, this.executor));
         });
+    }
+
+    private static Set<GroupArtifactVersion> mergedDependencies(final MinecraftEnvironment client, final MinecraftEnvironment server) {
+        final Set<GroupArtifactVersion> deps = new HashSet<>();
+        deps.addAll(client.dependencies());
+        deps.addAll(server.dependencies());
+        return Collections.unmodifiableSet(deps);
     }
 
     /**
@@ -333,7 +387,7 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
         boolean requiresLocalStorage = false;
         // Synchronously compute the modifier populator providers
         @SuppressWarnings({"unchecked", "rawtypes"})
-        final CompletableFuture<ArtifactModifier.AtlasPopulator>[] populators = new CompletableFuture[modifiers.size()];
+        final CompletableFuture<ArtifactModifier.TransformerProvider>[] populators = new CompletableFuture[modifiers.size()];
 
         int idx = 0;
         for (final ArtifactModifier modifier : modifiers) {
@@ -355,8 +409,8 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                         "jar"
                     );
                     if (!this.forceRefresh && input.upToDate() && Files.isRegularFile(output)) {
-                        this.writeMetaIfNecessary(side, decoratedArtifact, input.mapIfPresent((upToDate, env) -> env.metadata()), output.getParent());
-                        return ResolutionResult.result(new MinecraftEnvironmentImpl(decoratedArtifact, output, input.get().metadata()), true);
+                        this.writeMetaIfNecessary(side, decoratedArtifact, input.mapIfPresent((upToDate, env) -> env.metadata()), input.get()::dependencies, output.getParent());
+                        return ResolutionResult.result(new MinecraftEnvironmentImpl(decoratedArtifact, output, input.get()::dependencies, input.get().metadata()), true);
                     } else {
                         if (!input.isPresent()) {
                             return ResolutionResult.notFound();
@@ -365,22 +419,25 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
                         final Path outputTmp = Files.createTempDirectory("vanillagradle").resolve("output" + decoratedArtifact + ".jar");
                         FileUtils.createDirectoriesSymlinkSafe(output.getParent());
 
-                        try (final Atlas atlas = new Atlas(this.executor)) {
-                            for (final CompletableFuture<ArtifactModifier.AtlasPopulator> populator : populators) {
-                                atlas.install(populator.get()::provide);
-                            }
+                        final Renamer.Builder builder = Renamer.builder()
+                            .input(input.get().jar().toFile())
+                            .output(outputTmp.toFile());
 
-                            atlas.run(input.get().jar(), outputTmp);
+                        for (final CompletableFuture<ArtifactModifier.TransformerProvider> populator : populators) {
+                            builder.add(populator.get().provide());
                         }
 
+                        builder.build()
+                            .run();
+
                         FileUtils.atomicMove(outputTmp, output);
-                        this.writeMetaIfNecessary(side, decoratedArtifact, input.mapIfPresent((upToDate, env) -> env.metadata()), output.getParent());
-                        return ResolutionResult.result(new MinecraftEnvironmentImpl(decoratedArtifact, output, input.get().metadata()), false);
+                        this.writeMetaIfNecessary(side, decoratedArtifact, input.mapIfPresent((upToDate, env) -> env.metadata()), input.get()::dependencies, output.getParent());
+                        return ResolutionResult.result(new MinecraftEnvironmentImpl(decoratedArtifact, output, input.get()::dependencies, input.get().metadata()), false);
                     }
                 } catch (final Exception ex) {
                     throw new CompletionException(ex);
                 } finally {
-                    for (final CompletableFuture<ArtifactModifier.AtlasPopulator> populator : populators) {
+                    for (final CompletableFuture<ArtifactModifier.TransformerProvider> populator : populators) {
                         if (!populator.isCompletedExceptionally()) {
                             try {
                                 populator.join().close();
@@ -415,63 +472,109 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
     }
 
     @Override
-    public CompletableFuture<ResolutionResult<Path>> produceAssociatedArtifactSync(
+    public CompletableFuture<ResolutionResult<Path>> produceAssociatedArtifact(
         final MinecraftPlatform side,
         final String version,
         final Set<ArtifactModifier> modifiers,
         final String id,
         final Set<AssociatedResolutionFlags> flags,
-        final BiConsumer<MinecraftEnvironment, Path> action
+        final BiFunction<MinecraftEnvironment, Path, CompletableFuture<?>> action
     ) {
         // We need to compute our own key to be able to query the map
         final String decoratedArtifact = ArtifactModifier.decorateArtifactId(side.artifactId(), modifiers) + '-' + id;
-        final CompletableFuture<ResolutionResult<Path>> ourResult = new CompletableFuture<>();
-        final @Nullable CompletableFuture<ResolutionResult<Path>> existing = this.associatedArtifacts.putIfAbsent(EnvironmentKey.of(side, version, decoratedArtifact), ourResult);
-        if (existing != null) { // don't resolve twice
-            return existing;
-        }
 
         // there's nothing yet, it's our time to resolve
-        final ResolutionResult<MinecraftEnvironment> envResult;
-        try {
-            envResult = this.provide(side, version, modifiers).get();
-        } catch (final ExecutionException ex) {
-            ourResult.completeExceptionally(ex.getCause());
-            return ourResult;
-        } catch (final InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            ourResult.completeExceptionally(ex);
-            return ourResult;
+        return this.associatedArtifacts.computeIfAbsent(
+            EnvironmentKey.of(side, version, decoratedArtifact),
+            key -> this.provide(side, version, modifiers).thenComposeAsync(
+                envResult -> {
+                    if (!envResult.isPresent()) {
+                        throw new IllegalStateException("No environment could be found for '" + side + "' version " + version);
+                    }
+                    final MinecraftEnvironment env = envResult.get();
+                    final Path output = env.jar().resolveSibling(env.decoratedArtifactId() + "-" + env.metadata().id() + "-" + id + ".jar");
+                    if (this.forceRefresh || !envResult.upToDate() || flags.contains(AssociatedResolutionFlags.FORCE_REGENERATE) || !Files.exists(output)) {
+                        final Path tempOutDir;
+                        try {
+                            tempOutDir = Files.createTempDirectory("vanillagradle-" + env.decoratedArtifactId() + "-" + id);
+                        } catch (final IOException ex) {
+                            throw new CompletionException(ex);
+                        }
+                        final Path tempOut = tempOutDir.resolve(id + ".jar");
+
+                        final CompletableFuture<?> actionResult;
+                        if (flags.contains(AssociatedResolutionFlags.MODIFIES_ORIGINAL)) {
+                            // To safely modify the input, we copy it to a temporary location, then copy back when the action successfully completes
+                            final Path tempInput = tempOutDir.resolve("original-to-modify.jar");
+                            try {
+                                Files.copy(env.jar(), tempInput);
+                            } catch (final IOException ex) {
+                                throw new CompletionException(ex);
+                            }
+                            actionResult = action.apply(new MinecraftEnvironmentImpl(env.decoratedArtifactId(), tempInput, env::dependencies, env.metadata()), tempOut)
+                                .thenApply(in -> {
+                                    try {
+                                        FileUtils.atomicMove(tempInput, env.jar());
+                                    } catch (final IOException ex) {
+                                        throw new CompletionException(ex);
+                                    }
+                                    return in;
+                                });
+                        } else {
+                            actionResult = action.apply(env, tempOut);
+                        }
+                        return actionResult.thenApply(in -> {
+                            try {
+                                FileUtils.atomicMove(tempOut, output);
+                            } catch (final IOException ex) {
+                                throw new CompletionException(ex);
+                            }
+                            return ResolutionResult.result(output, false);
+                        });
+                    } else {
+                        return CompletableFuture.completedFuture(ResolutionResult.result(output, true)); // todo: find some better way of checking validity? for ex. when decompiler version changes
+                    }
+                },
+                this.executor()
+            )
+        );
+    }
+
+    @Override
+    public <T> T processSyncTasksUntilComplete(final CompletableFuture<T> future) throws InterruptedException, ExecutionException {
+        if (future.isDone()) {
+            return future.get();
         }
 
-        if (!envResult.isPresent()) {
-            throw new IllegalStateException("No environment could be found for '" + side + "' version " + version);
-        }
-        final MinecraftEnvironment env = envResult.get();
-        final Path output = env.jar().resolveSibling(env.decoratedArtifactId() + "-" + env.metadata().id() + "-" + id + ".jar");
-        try {
-            if (this.forceRefresh || !envResult.upToDate() || flags.contains(AssociatedResolutionFlags.FORCE_REGENERATE) || !Files.exists(output)) {
-                final Path tempOutDir = Files.createTempDirectory("vanillagradle-" + env.decoratedArtifactId() + "-" + id);
-                final Path tempOut = tempOutDir.resolve(id + ".jar");
+        future.handleAsync(
+            (res, err) -> {
+                this.syncTasks.add(new CompleteEvaluation(future));
+                return res;
+            },
+            this.executor
+        );
 
-                if (flags.contains(AssociatedResolutionFlags.MODIFIES_ORIGINAL)) {
-                    // To safely modify the input, we copy it to a temporary location, then copy back when the action successfully completes
-                    final Path tempInput = tempOutDir.resolve("original-to-modify.jar");
-                    Files.copy(env.jar(), tempInput);
-                    action.accept(new MinecraftEnvironmentImpl(env.decoratedArtifactId(), tempInput, env.metadata()), tempOut);
-                    FileUtils.atomicMove(tempInput, env.jar());
+        Runnable action;
+        for (;;) {
+            action = this.syncTasks.take();
+
+            // todo: rethrow exceptions with an ExecutionException
+            if (action instanceof CompleteEvaluation) {
+                if (((CompleteEvaluation) action).completed == future) {
+                    break;
                 } else {
-                    action.accept(env, tempOut);
+                    this.syncTasks.add(action);
                 }
-                FileUtils.atomicMove(tempOut, output);
-                ourResult.complete(ResolutionResult.result(output, false));
-            } else {
-                ourResult.complete(ResolutionResult.result(output, true)); // todo: find some better way of checking validity? for ex. when decompiler version changes
             }
-        } catch (final Exception ex) {
-            ourResult.completeExceptionally(ex);
+
+            try {
+                action.run();
+            } catch (final Exception ex) {
+                MinecraftResolverImpl.LOGGER.error("Failed to execute synchronous task {} while resolving {}", action, future, ex);
+            }
         }
-        return ourResult;
+
+        return future.get();
     }
 
     private String sharedArtifactFileName(
@@ -528,12 +631,14 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
     private void writeMetaIfNecessary(
         final MinecraftPlatform platform,
         final ResolutionResult<VersionDescriptor.Full> version,
+        final Supplier<Set<GroupArtifactVersion>> dependencies,
         final Path baseDir
     ) throws IOException, XMLStreamException {
         this.writeMetaIfNecessary(
             platform,
             platform.artifactId(),
             version,
+            dependencies,
             baseDir
         );
     }
@@ -542,6 +647,7 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
         final MinecraftPlatform platform,
         final String artifactIdOverride,
         final ResolutionResult<VersionDescriptor.Full> version,
+        final Supplier<Set<GroupArtifactVersion>> dependencies,
         final Path baseDir
     ) throws IOException, XMLStreamException {
         if (!version.isPresent()) {
@@ -553,8 +659,9 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
             final Path metaFileTmp = FileUtils.temporaryPath(metaFile.getParent(), "metadata");
             try (final IvyModuleWriter writer = new IvyModuleWriter(metaFileTmp)) {
                 writer.overrideArtifactId(artifactIdOverride)
-                    .extraDependencies(Constants.INJECTED_DEPENDENCIES)
-                    .write(version.get(), platform, RuleContext.create());
+                    .dependencies(dependencies.get())
+                    .dependencies(Constants.INJECTED_DEPENDENCIES)
+                    .write(version.get(), platform);
             }
             FileUtils.atomicMove(metaFileTmp, metaFile);
         }
@@ -587,11 +694,13 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
 
         private final String decoratedArtifactId;
         private final Path jar;
+        private final Supplier<Set<GroupArtifactVersion>> dependencies;
         private final VersionDescriptor.Full metadata;
 
-        MinecraftEnvironmentImpl(final String decoratedArtifactId, final Path jar, final VersionDescriptor.Full metadata) {
+        MinecraftEnvironmentImpl(final String decoratedArtifactId, final Path jar, final Supplier<Set<GroupArtifactVersion>> dependencies, final VersionDescriptor.Full metadata) {
             this.decoratedArtifactId = decoratedArtifactId;
             this.jar = jar;
+            this.dependencies = FunctionalUtils.memoizeSupplier(dependencies);
             this.metadata = metadata;
         }
 
@@ -606,8 +715,28 @@ public class MinecraftResolverImpl implements MinecraftResolver, MinecraftResolv
         }
 
         @Override
+        public Set<GroupArtifactVersion> dependencies() {
+            return this.dependencies.get();
+        }
+
+        @Override
         public VersionDescriptor.Full metadata() {
             return this.metadata;
+        }
+
+    }
+
+    static final class CompleteEvaluation implements Runnable {
+
+        final CompletableFuture<?> completed;
+
+        CompleteEvaluation(final CompletableFuture<?> completed) {
+            this.completed = completed;
+        }
+
+        @Override
+        public void run() {
+            // no-op
         }
 
     }

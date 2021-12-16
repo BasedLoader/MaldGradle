@@ -24,20 +24,22 @@
  */
 package org.spongepowered.gradle.vanilla.repository;
 
+import org.spongepowered.gradle.vanilla.internal.model.GroupArtifactVersion;
 import org.spongepowered.gradle.vanilla.internal.model.VersionDescriptor;
 import org.spongepowered.gradle.vanilla.internal.model.VersionManifestRepository;
-import org.spongepowered.gradle.vanilla.resolver.Downloader;
 import org.spongepowered.gradle.vanilla.internal.repository.ResolvableTool;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.ArtifactModifier;
 import org.spongepowered.gradle.vanilla.internal.repository.modifier.AssociatedResolutionFlags;
+import org.spongepowered.gradle.vanilla.resolver.Downloader;
 import org.spongepowered.gradle.vanilla.resolver.ResolutionResult;
 
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
-import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 public interface MinecraftResolver {
@@ -49,14 +51,14 @@ public interface MinecraftResolver {
      * detected by existing input detection, or would make data unreadable by
      * older versions of the resolver, this version will be incremented.</p>
      */
-    int STORAGE_VERSION = 1;
+    int STORAGE_VERSION = 2;
     /**
      * A version for stored metadata.
      *
      * <p>Whenever the {@link #STORAGE_VERSION} is incremented, this version
      * will be reset to {@code 1}</p>
      */
-    int METADATA_VERSION = 2;
+    int METADATA_VERSION = 1;
 
     /**
      * Get the version manifest repository managed by this resolver.
@@ -95,7 +97,25 @@ public interface MinecraftResolver {
      *     environment and a target path
      * @return a future returning the result of resolving a jar path
      */
-    CompletableFuture<ResolutionResult<Path>> produceAssociatedArtifactSync(final MinecraftPlatform side, final String version, final Set<ArtifactModifier> modifiers, final String id, final Set<AssociatedResolutionFlags> flags, final BiConsumer<MinecraftEnvironment, Path> action);
+    CompletableFuture<ResolutionResult<Path>> produceAssociatedArtifact(
+        final MinecraftPlatform side,
+        final String version,
+        final Set<ArtifactModifier> modifiers,
+        final String id,
+        final Set<AssociatedResolutionFlags> flags,
+        final BiFunction<MinecraftEnvironment, Path, CompletableFuture<?>> action
+    );
+
+    /**
+     * Block on the completion of a provided future, processing "sync" tasks while
+     * that occurs.
+     *
+     * @param <T> the return value type
+     * @param future the future to await
+     * @return the result of the future
+     * @throws ExecutionException if the task execution fails
+     */
+    <T> T processSyncTasksUntilComplete(CompletableFuture<T> future) throws ExecutionException, InterruptedException;
 
     interface MinecraftEnvironment {
 
@@ -113,6 +133,16 @@ public interface MinecraftResolver {
          * @return the output jar
          */
         Path jar();
+
+        /**
+         * The dependencies to apply for this environment, given the active OS.
+         *
+         * <p>This may be derived from the client launcher metadata, the server
+         * bundler metadata, or other sources yet unknown.</p>
+         *
+         * @return the dependencies
+         */
+        Set<GroupArtifactVersion> dependencies();
 
         /**
          * The Mojang-provided metadata for a certain Minecraft environment.
@@ -151,13 +181,22 @@ public interface MinecraftResolver {
         Executor executor();
 
         /**
-         * Return a child classloader with a tool and its dependencies on the
-         * classpath, as well as the VanillaGradle jar.
+         * An executor for performing main-thread synchronous operations, like some
+         * dependency resolution.
          *
-         * <p>This is a very fragile arrangement but it allows some dependencies
-         * to be overridden at runtime. Classes from Gradle, VanillaGradle's
-         * dependencies, and the JDK can be safely shared, but VanillaGradle
-         * classes CAN NOT.</p>
+         * @return the synchronous executor
+         */
+        Executor syncExecutor();
+
+        /**
+         * Return a child classloader with a tool and its dependencies on the classpath,
+         * as well as the VanillaGradle jar.
+         *
+         * <p>This is a very fragile arrangement but it allows some dependencies to be
+         * overridden at runtime. Classes from Gradle, VanillaGradle's dependencies, and
+         * the JDK can be safely shared, but VanillaGradle classes CAN NOT.</p>
+         *
+         * <p>This must be run on the {@link #syncExecutor()}.</p>
          *
          * @param tool the tool to resolve
          * @return a class loader with the tool on the classpath

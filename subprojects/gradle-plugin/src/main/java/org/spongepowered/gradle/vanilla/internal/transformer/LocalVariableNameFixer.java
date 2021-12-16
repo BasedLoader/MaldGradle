@@ -22,40 +22,22 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package org.spongepowered.gradle.vanilla.internal.model;
+package org.spongepowered.gradle.vanilla.internal.transformer;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-import org.immutables.value.Value;
+import net.minecraftforge.fart.api.Transformer;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.spongepowered.gradle.vanilla.internal.asm.LocalVariableNamingClassVisitor;
 
-@Value.Immutable(builder = false)
-public abstract class GroupArtifactVersion {
-
-    public static GroupArtifactVersion of(final String group, final String artifact, final @Nullable String version) {
-        return new GroupArtifactVersionImpl(group, artifact, version);
-    }
-
-    public static GroupArtifactVersion parse(final String notation) {
-        final String[] split = notation.split(":");
-        if (split.length > 4 || split.length < 2) {
-            throw new IllegalArgumentException("Unsupported notation '" + notation + "', must be in the format of group:artifact[:version[:classifier]]");
-        }
-        return GroupArtifactVersion.of(split[0], split[1], split.length > 2 ? split[2] : null);
-    }
-
-    GroupArtifactVersion() {
-    }
-
-    @Value.Parameter
-    public abstract String group();
-
-    @Value.Parameter
-    public abstract String artifact();
-
-    @Value.Parameter
-    public abstract @Nullable String version();
+final class LocalVariableNameFixer implements Transformer {
 
     @Override
-    public final String toString() {
-        return this.group() + ':' + this.artifact() + (this.version() == null ? "" : ':' + this.version());
+    public ClassEntry process(final ClassEntry entry) {
+        final ClassReader reader = new ClassReader(entry.getData());
+        final ClassWriter writer = new ClassWriter(reader, 0);
+        final LocalVariableNamingClassVisitor visitor = new LocalVariableNamingClassVisitor(writer);
+        reader.accept(visitor, 0);
+        return ClassEntry.create(entry.getName(), entry.getTime(), writer.toByteArray());
     }
+
 }
